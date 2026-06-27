@@ -34,6 +34,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "vitest run",
     "check-entry": "node scripts/check-package-entry.mjs",
     "smoke": "node scripts/install-smoke.mjs",
     "changeset": "changeset",
@@ -47,8 +48,10 @@
     "@eslint/js": "^9.20.0",
     "@types/node": "^22.19.11",
     "eslint": "^9.20.0",
+    "fast-check": "^4.5.3",
     "tsup": "^8.3.6",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.0"
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
   }
 }
