@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Lint, Typecheck, Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable corepack
+        run: corepack enable
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> "$GITHUB_ENV"
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Build
+        run: pnpm build
+      - name: Package entry guard
+        run: node scripts/check-package-entry.mjs
+
+  install-smoke:
+    name: Published-package install smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install smoke (pack + consume)
+        run: node scripts/install-smoke.mjs
+
+  required-checks:
+    name: Required Checks Gate
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs:
+      - build-and-test
+      - install-smoke
+    steps:
+      - name: Validate required checks passed
+        shell: bash
+        run: |
+          failed=0
+          for result in "build-and-test:${{ needs.build-and-test.result }}" "install-smoke:${{ needs.install-smoke.result }}"; do
+            name="${result%%:*}"
+            status="${result##*:}"
+            if [ "${status}" != "success" ]; then
+              echo "Required check failed: ${name} => ${status}"
+              failed=1
+            fi
+          done
+          if [ "${failed}" -ne 0 ]; then exit 1; fi
+          echo "All required checks passed."
