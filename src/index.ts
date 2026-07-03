@@ -177,6 +177,155 @@ class FeaturesResource {
   }
 }
 
+export interface ExperimentVariantInput {
+  name: string;
+  allocation: number;
+  description?: string;
+  color?: string;
+  isControl?: boolean;
+  planId?: string;
+  priceOverride?: number;
+  pricingOverride?: unknown[];
+  copyOverride?: string;
+}
+
+export interface CreateExperimentInput {
+  name: string;
+  type: "plan_variant" | "pricing_variant" | "paywall_copy";
+  audienceSegment: string;
+  primaryMetric: string;
+  description?: string;
+  hypothesis?: string;
+  secondaryMetrics?: string[];
+  environment?: string;
+  approach?: "frequentist" | "bayesian";
+  significanceLevel?: number;
+  direction?: "one_sided" | "two_sided";
+  tags?: string[];
+  maintainer?: string;
+  variants: ExperimentVariantInput[];
+}
+
+export interface Experiment {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  status: string;
+  audienceSegment: string;
+  primaryMetric: string;
+  secondaryMetrics: string[];
+  variants: Array<Record<string, unknown>>;
+  results?: Array<Record<string, unknown>>;
+  approach: string;
+  significanceLevel: number;
+  direction: string;
+  currentIteration?: number;
+  createdAt: string;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface ExperimentAssignmentResult {
+  experimentId: string;
+  experimentType: string;
+  variantId: string;
+  variantName: string;
+  isControl: boolean;
+  bucket: number;
+  assigned: boolean;
+  planId?: string;
+  pricing?: unknown[];
+  copyOverride?: string;
+  exposedAt: string | null;
+  exposureCount: number;
+  convertedAt: string | null;
+}
+
+export interface ConversionResult {
+  converted: number;
+}
+
+/**
+ * Experiments: create/manage pricing, plan, and paywall A/B tests; resolve a
+ * customer's sticky variant assignment (recording an exposure) and record
+ * conversions; drive the lifecycle and on-demand evaluation.
+ */
+class ExperimentsResource {
+  constructor(private http: HttpClient) {}
+
+  async list(): Promise<Experiment[]> {
+    return this.http.get<Experiment[]>("/api/v1/experiments");
+  }
+
+  async get(experimentId: string): Promise<Experiment> {
+    return this.http.get<Experiment>(`/api/v1/experiments/${experimentId}`);
+  }
+
+  async create(data: CreateExperimentInput): Promise<Experiment> {
+    return this.http.post<Experiment>("/api/v1/experiments", data);
+  }
+
+  async start(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/start`, {});
+  }
+
+  async pause(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/pause`, {});
+  }
+
+  async resume(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/resume`, {});
+  }
+
+  async stop(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/stop`, {});
+  }
+
+  async archive(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/archive`, {});
+  }
+
+  async evaluate(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/evaluate`, {});
+  }
+
+  async iterate(experimentId: string): Promise<Experiment> {
+    return this.http.post<Experiment>(`/api/v1/experiments/${experimentId}/iterate`, {});
+  }
+
+  async ship(experimentId: string, variantId?: string): Promise<Experiment> {
+    return this.http.post<Experiment>(
+      `/api/v1/experiments/${experimentId}/ship`,
+      variantId ? { variantId } : {},
+    );
+  }
+
+  /** Resolve the customer's sticky variant and (by default) record an exposure. */
+  async assign(
+    experimentId: string,
+    customerId: string,
+    options?: { record?: boolean },
+  ): Promise<ExperimentAssignmentResult> {
+    return this.http.post<ExperimentAssignmentResult>(
+      `/api/v1/experiments/${experimentId}/assignments`,
+      { customerId, ...(options?.record !== undefined ? { record: options.record } : {}) },
+    );
+  }
+
+  /** Record a conversion for the customer's assignment on this experiment. */
+  async recordConversion(
+    experimentId: string,
+    customerId: string,
+    value?: number,
+  ): Promise<ConversionResult> {
+    return this.http.post<ConversionResult>(
+      `/api/v1/experiments/${experimentId}/conversions`,
+      { customerId, ...(value !== undefined ? { value } : {}) },
+    );
+  }
+}
+
 // ============================================================
 // Main Client
 // ============================================================
@@ -189,6 +338,7 @@ export class MonetizeKit {
   public readonly credits: CreditsResource;
   public readonly plans: PlansResource;
   public readonly features: FeaturesResource;
+  public readonly experiments: ExperimentsResource;
 
   private readonly http: HttpClient;
 
@@ -201,5 +351,6 @@ export class MonetizeKit {
     this.credits = new CreditsResource(this.http);
     this.plans = new PlansResource(this.http);
     this.features = new FeaturesResource(this.http);
+    this.experiments = new ExperimentsResource(this.http);
   }
 }
