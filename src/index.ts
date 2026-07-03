@@ -252,7 +252,14 @@ class CreditsResource {
     return this.http.post("/api/v1/credits/grant", data);
   }
 
-  async debit(data: { customerId: string; amount: number; reason?: string; [key: string]: unknown }): Promise<unknown> {
+  async debit(data: {
+    customerId: string;
+    amount: number;
+    reason?: string;
+    /** Dimensional attribution recorded on the debit ledger entry (e.g. { model, feature }). */
+    dimensions?: Record<string, string | number | boolean>;
+    [key: string]: unknown;
+  }): Promise<unknown> {
     return this.http.post("/api/v1/credits/debit", data);
   }
 }
