@@ -168,6 +168,23 @@ class UsageResource {
   async get(customerId: string, meterId: string): Promise<unknown> {
     return this.http.get(`/api/v1/usage/${customerId}/${meterId}`);
   }
+
+  /** Per-dimension usage breakdown (e.g. tokens by `model`) with per-model credit cost. */
+  async breakdown(
+    customerId: string,
+    meterId: string,
+    dimension: string,
+  ): Promise<{
+    meterId: string;
+    dimension: string;
+    window: string;
+    total: number;
+    totalCreditCost: number;
+    breakdown: Array<{ value: string; total: number; count: number; creditCost: number }>;
+  }> {
+    const qs = new URLSearchParams({ dimension });
+    return this.http.get(`/api/v1/usage/${customerId}/${meterId}/breakdown?${qs}`);
+  }
 }
 
 export type EntityType = "user" | "agent" | "seat" | "team";
