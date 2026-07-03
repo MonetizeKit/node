@@ -49,6 +49,23 @@ export type {
 // Resource Namespaces
 // ============================================================
 
+export interface PreflightResult {
+  allowed: boolean;
+  customerId: string;
+  entitlement: {
+    featureKey: string;
+    allowed: boolean;
+    effectiveValue: unknown;
+    type: string;
+    usage?: number;
+    limit?: number;
+    remaining?: number;
+  } | null;
+  budget: { denied: boolean; denyLimit: number | null; degraded: boolean; requiresTopup: boolean };
+  credits: { balance: number; required: number; sufficient: boolean } | null;
+  reasons: string[];
+}
+
 class EntitlementsResource {
   constructor(private http: HttpClient) {}
 
@@ -62,6 +79,21 @@ class EntitlementsResource {
     return this.http.get<EntitlementResult[]>(
       `/api/v1/entitlements/${customerId}`,
     );
+  }
+
+  /**
+   * Combined pre-flight gate: resolves entitlement + budget policy + credit
+   * balance in one call so an AI app can allow/degrade/top-up/deny before serving.
+   */
+  async preflight(params: {
+    customerId: string;
+    subjectId?: string;
+    featureKey?: string;
+    meterId?: string;
+    estimatedValue?: number;
+    requiredCredits?: number;
+  }): Promise<PreflightResult> {
+    return this.http.post<PreflightResult>("/api/v1/entitlements/preflight", params);
   }
 }
 
