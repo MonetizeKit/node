@@ -122,6 +122,10 @@ class UsageResource {
     customerId: string;
     meterId: string;
     value: number;
+    /** Optional sub-customer entity (user/agent/seat/team) this usage is attributed to. */
+    subjectId?: string;
+    /** Optional dimensional metadata (e.g. { model, operation }). */
+    dimensions?: Record<string, string | number | boolean>;
     description?: string;
     idempotencyKey?: string;
     [key: string]: unknown;
@@ -131,6 +135,60 @@ class UsageResource {
 
   async get(customerId: string, meterId: string): Promise<unknown> {
     return this.http.get(`/api/v1/usage/${customerId}/${meterId}`);
+  }
+}
+
+export type EntityType = "user" | "agent" | "seat" | "team";
+
+export interface Entity {
+  id: string;
+  customerId: string;
+  type: EntityType;
+  externalId: string;
+  name: string;
+  parentEntityId?: string;
+  attributes: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Sub-customer entities (users/agents/seats/teams) under a customer. */
+class EntitiesResource {
+  constructor(private http: HttpClient) {}
+
+  async list(customerId: string): Promise<Entity[]> {
+    return this.http.get<Entity[]>(`/api/v1/customers/${customerId}/entities`);
+  }
+
+  async get(customerId: string, entityId: string): Promise<Entity> {
+    return this.http.get<Entity>(`/api/v1/customers/${customerId}/entities/${entityId}`);
+  }
+
+  async create(
+    customerId: string,
+    data: {
+      type: EntityType;
+      externalId: string;
+      name?: string;
+      parentEntityId?: string | null;
+      attributes?: Record<string, unknown>;
+    },
+  ): Promise<Entity> {
+    return this.http.post<Entity>(`/api/v1/customers/${customerId}/entities`, data);
+  }
+
+  async update(
+    customerId: string,
+    entityId: string,
+    data: { name?: string; parentEntityId?: string | null; attributes?: Record<string, unknown> },
+  ): Promise<Entity> {
+    return this.http.patch<Entity>(`/api/v1/customers/${customerId}/entities/${entityId}`, data);
+  }
+
+  async delete(customerId: string, entityId: string): Promise<{ id: string; deleted: boolean }> {
+    return this.http.delete<{ id: string; deleted: boolean }>(
+      `/api/v1/customers/${customerId}/entities/${entityId}`,
+    );
   }
 }
 
@@ -339,6 +397,7 @@ export class MonetizeKit {
   public readonly plans: PlansResource;
   public readonly features: FeaturesResource;
   public readonly experiments: ExperimentsResource;
+  public readonly entities: EntitiesResource;
 
   private readonly http: HttpClient;
 
@@ -352,5 +411,6 @@ export class MonetizeKit {
     this.plans = new PlansResource(this.http);
     this.features = new FeaturesResource(this.http);
     this.experiments = new ExperimentsResource(this.http);
+    this.entities = new EntitiesResource(this.http);
   }
 }
