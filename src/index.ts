@@ -256,11 +256,33 @@ class CreditsResource {
     customerId: string;
     amount: number;
     reason?: string;
+    /** Source wallet (defaults to "default"). */
+    walletKey?: string;
     /** Dimensional attribution recorded on the debit ledger entry (e.g. { model, feature }). */
     dimensions?: Record<string, string | number | boolean>;
     [key: string]: unknown;
   }): Promise<unknown> {
     return this.http.post("/api/v1/credits/debit", data);
+  }
+
+  /** Charge the wallet's credit pack off-session and grant its credits. */
+  async topup(data: {
+    customerId: string;
+    walletKey?: string;
+    packId?: string;
+  }): Promise<{ status: string; paymentIntentId: string | null; granted: number; walletKey: string }> {
+    return this.http.post("/api/v1/credits/topup", data);
+  }
+
+  /** Configure (or disable) a wallet's auto top-up policy. */
+  async configureAutoTopup(data: {
+    customerId: string;
+    walletKey?: string;
+    enabled: boolean;
+    threshold: number;
+    packId: string;
+  }): Promise<unknown> {
+    return this.http.request("PUT", "/api/v1/credits/auto-topup", data);
   }
 }
 
