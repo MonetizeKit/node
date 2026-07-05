@@ -25,7 +25,7 @@ export class HttpClient {
       throw new ConfigurationError("API key is required. Pass it as `apiKey` in the constructor.");
     }
     this.apiKey = config.apiKey;
-    this.baseUrl = (config.baseUrl ?? "https://api.monetizekit.com").replace(/\/+$/, "");
+    this.baseUrl = (config.baseUrl ?? "https://app.monetizekit.app").replace(/\/+$/, "");
     this.timeout = config.timeout ?? 30_000;
     this.maxRetries = config.maxRetries ?? 3;
   }
