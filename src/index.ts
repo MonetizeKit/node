@@ -49,6 +49,23 @@ export type {
 // Resource Namespaces
 // ============================================================
 
+export interface PreflightResult {
+  allowed: boolean;
+  customerId: string;
+  entitlement: {
+    featureKey: string;
+    allowed: boolean;
+    effectiveValue: unknown;
+    type: string;
+    usage?: number;
+    limit?: number;
+    remaining?: number;
+  } | null;
+  budget: { denied: boolean; denyLimit: number | null; degraded: boolean; requiresTopup: boolean };
+  credits: { balance: number; required: number; sufficient: boolean } | null;
+  reasons: string[];
+}
+
 class EntitlementsResource {
   constructor(private http: HttpClient) {}
 
@@ -62,6 +79,21 @@ class EntitlementsResource {
     return this.http.get<EntitlementResult[]>(
       `/api/v1/entitlements/${customerId}`,
     );
+  }
+
+  /**
+   * Combined pre-flight gate: resolves entitlement + budget policy + credit
+   * balance in one call so an AI app can allow/degrade/top-up/deny before serving.
+   */
+  async preflight(params: {
+    customerId: string;
+    subjectId?: string;
+    featureKey?: string;
+    meterId?: string;
+    estimatedValue?: number;
+    requiredCredits?: number;
+  }): Promise<PreflightResult> {
+    return this.http.post<PreflightResult>("/api/v1/entitlements/preflight", params);
   }
 }
 
@@ -122,6 +154,10 @@ class UsageResource {
     customerId: string;
     meterId: string;
     value: number;
+    /** Optional sub-customer entity (user/agent/seat/team) this usage is attributed to. */
+    subjectId?: string;
+    /** Optional dimensional metadata (e.g. { model, operation }). */
+    dimensions?: Record<string, string | number | boolean>;
     description?: string;
     idempotencyKey?: string;
     [key: string]: unknown;
@@ -131,6 +167,77 @@ class UsageResource {
 
   async get(customerId: string, meterId: string): Promise<unknown> {
     return this.http.get(`/api/v1/usage/${customerId}/${meterId}`);
+  }
+
+  /** Per-dimension usage breakdown (e.g. tokens by `model`) with per-model credit cost. */
+  async breakdown(
+    customerId: string,
+    meterId: string,
+    dimension: string,
+  ): Promise<{
+    meterId: string;
+    dimension: string;
+    window: string;
+    total: number;
+    totalCreditCost: number;
+    breakdown: Array<{ value: string; total: number; count: number; creditCost: number }>;
+  }> {
+    const qs = new URLSearchParams({ dimension });
+    return this.http.get(`/api/v1/usage/${customerId}/${meterId}/breakdown?${qs}`);
+  }
+}
+
+export type EntityType = "user" | "agent" | "seat" | "team";
+
+export interface Entity {
+  id: string;
+  customerId: string;
+  type: EntityType;
+  externalId: string;
+  name: string;
+  parentEntityId?: string;
+  attributes: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Sub-customer entities (users/agents/seats/teams) under a customer. */
+class EntitiesResource {
+  constructor(private http: HttpClient) {}
+
+  async list(customerId: string): Promise<Entity[]> {
+    return this.http.get<Entity[]>(`/api/v1/customers/${customerId}/entities`);
+  }
+
+  async get(customerId: string, entityId: string): Promise<Entity> {
+    return this.http.get<Entity>(`/api/v1/customers/${customerId}/entities/${entityId}`);
+  }
+
+  async create(
+    customerId: string,
+    data: {
+      type: EntityType;
+      externalId: string;
+      name?: string;
+      parentEntityId?: string | null;
+      attributes?: Record<string, unknown>;
+    },
+  ): Promise<Entity> {
+    return this.http.post<Entity>(`/api/v1/customers/${customerId}/entities`, data);
+  }
+
+  async update(
+    customerId: string,
+    entityId: string,
+    data: { name?: string; parentEntityId?: string | null; attributes?: Record<string, unknown> },
+  ): Promise<Entity> {
+    return this.http.patch<Entity>(`/api/v1/customers/${customerId}/entities/${entityId}`, data);
+  }
+
+  async delete(customerId: string, entityId: string): Promise<{ id: string; deleted: boolean }> {
+    return this.http.delete<{ id: string; deleted: boolean }>(
+      `/api/v1/customers/${customerId}/entities/${entityId}`,
+    );
   }
 }
 
@@ -145,8 +252,37 @@ class CreditsResource {
     return this.http.post("/api/v1/credits/grant", data);
   }
 
-  async debit(data: { customerId: string; amount: number; reason?: string; [key: string]: unknown }): Promise<unknown> {
+  async debit(data: {
+    customerId: string;
+    amount: number;
+    reason?: string;
+    /** Source wallet (defaults to "default"). */
+    walletKey?: string;
+    /** Dimensional attribution recorded on the debit ledger entry (e.g. { model, feature }). */
+    dimensions?: Record<string, string | number | boolean>;
+    [key: string]: unknown;
+  }): Promise<unknown> {
     return this.http.post("/api/v1/credits/debit", data);
+  }
+
+  /** Charge the wallet's credit pack off-session and grant its credits. */
+  async topup(data: {
+    customerId: string;
+    walletKey?: string;
+    packId?: string;
+  }): Promise<{ status: string; paymentIntentId: string | null; granted: number; walletKey: string }> {
+    return this.http.post("/api/v1/credits/topup", data);
+  }
+
+  /** Configure (or disable) a wallet's auto top-up policy. */
+  async configureAutoTopup(data: {
+    customerId: string;
+    walletKey?: string;
+    enabled: boolean;
+    threshold: number;
+    packId: string;
+  }): Promise<unknown> {
+    return this.http.request("PUT", "/api/v1/credits/auto-topup", data);
   }
 }
 
@@ -339,6 +475,7 @@ export class MonetizeKit {
   public readonly plans: PlansResource;
   public readonly features: FeaturesResource;
   public readonly experiments: ExperimentsResource;
+  public readonly entities: EntitiesResource;
 
   private readonly http: HttpClient;
 
@@ -352,5 +489,6 @@ export class MonetizeKit {
     this.plans = new PlansResource(this.http);
     this.features = new FeaturesResource(this.http);
     this.experiments = new ExperimentsResource(this.http);
+    this.entities = new EntitiesResource(this.http);
   }
 }
