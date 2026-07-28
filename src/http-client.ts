@@ -43,7 +43,7 @@ export class HttpClient {
       "Authorization": `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
       "X-Request-Id": requestId,
-      "User-Agent": "@monetizekit/node/0.1.0",
+      "User-Agent": "@monetizekit/node/0.2.0",
     };
 
     if (idempotencyKey) {
