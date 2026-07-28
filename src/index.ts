@@ -128,6 +128,7 @@ class EntitlementsResource {
       cached: decision.cached ?? false,
       degraded: decision.degraded ?? false,
       timestamp: new Date().toISOString(),
+      ...(decision.evaluationId ? { evaluationId: decision.evaluationId } : {}),
       ...(error ? { error } : {}),
     });
   }
