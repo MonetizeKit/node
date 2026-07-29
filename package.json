@@ -1,6 +1,6 @@
 {
   "name": "@monetizekit/node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MonetizeKit Node.js SDK for server-side entitlement checks, customer & subscription management, usage/credits, and webhook signature verification.",
   "license": "MIT",
   "repository": {
