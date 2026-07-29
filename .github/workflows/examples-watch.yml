@@ -12,9 +12,10 @@ name: Examples Watch
 # `--registry <registry> --repo node --files <list>` (once per loop) to get
 # the authoritative reports.
 #
-# See MonetizeKit/agent-skills → agents/example-maintenance,
-# agents/docs-maintenance, and agents/security-maintenance for the agent
-# charters.
+# Agent charters live with each loop's managed context in the monorepo:
+# app-monetizekit-monorepo/docs/engineering/{examples,docs,security}-maintenance/AGENT.md.
+# (MonetizeKit/agent-skills is the public customer-facing skills registry and
+# holds no internal charters.)
 
 on:
   push:
@@ -66,7 +67,7 @@ jobs:
               "",
               ...files.map((f) => `- \`${f}\``),
               "",
-              "**Agent next step** (see MonetizeKit/agent-skills → agents/example-maintenance, agents/docs-maintenance, agents/security-maintenance):",
+              "**Agent next step** (charters: app-monetizekit-monorepo → docs/engineering/{examples,docs,security}-maintenance/AGENT.md):",
               "",
               "```bash",
               "# in app-monetizekit-monorepo — run once per loop",
