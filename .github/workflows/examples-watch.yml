@@ -1,17 +1,19 @@
 name: Examples Watch
 
-# Example-maintenance loop, step 1 (watch + escalate) — SDK side.
+# Surface-maintenance loops (examples + docs), step 1 (watch + escalate) —
+# SDK side.
 #
-# The examples registry and impact script live in the monorepo
-# (app-monetizekit-monorepo/docs/engineering/examples-maintenance/registry.json,
-# scripts/examples-impact.mjs) so context stays single-sourced. This workflow
+# The surface registries and impact script live in the monorepo
+# (app-monetizekit-monorepo/docs/engineering/{examples,docs}-maintenance/registry.json,
+# scripts/surface-impact.mjs) so context stays single-sourced. This workflow
 # only computes the changed-file list for the SDK's public surface and
-# escalates it as an `examples-drift` issue in THIS repo. The
-# example-maintenance agent picks the issue up and runs the monorepo impact
-# script with `--repo node --files <list>` to get the authoritative report.
+# escalates it as an `examples-drift` issue in THIS repo. The maintenance
+# agents pick the issue up and run the monorepo impact script with
+# `--registry <registry> --repo node --files <list>` (once per loop) to get
+# the authoritative reports.
 #
-# See MonetizeKit/agent-skills → agents/example-maintenance for the agent
-# charter.
+# See MonetizeKit/agent-skills → agents/example-maintenance and
+# agents/docs-maintenance for the agent charters.
 
 on:
   push:
@@ -63,14 +65,15 @@ jobs:
               "",
               ...files.map((f) => `- \`${f}\``),
               "",
-              "**Agent next step** (see MonetizeKit/agent-skills → agents/example-maintenance):",
+              "**Agent next step** (see MonetizeKit/agent-skills → agents/example-maintenance and agents/docs-maintenance):",
               "",
               "```bash",
-              "# in app-monetizekit-monorepo",
-              `node scripts/examples-impact.mjs --repo node --files "${files.join(",")}"`,
+              "# in app-monetizekit-monorepo — run once per loop",
+              `node scripts/surface-impact.mjs --registry docs/engineering/examples-maintenance/registry.json --repo node --files "${files.join(",")}"`,
+              `node scripts/surface-impact.mjs --registry docs/engineering/docs-maintenance/registry.json --repo node --files "${files.join(",")}"`,
               "```",
               "",
-              "Triage the resulting report, fix drifted examples, refresh `verified` stamps in the registry, then close this issue.",
+              "Triage the resulting reports, fix drifted surfaces, refresh `verified` stamps in the registries, then close this issue.",
               "",
               "---",
               "_Escalated automatically by `.github/workflows/examples-watch.yml`._",
