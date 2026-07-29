@@ -54,6 +54,29 @@ const mk = new MonetizeKit({
 });
 ```
 
+### OpenTelemetry
+
+One line maps every decision onto your existing OTel setup — spans nested in
+your active traces plus bounded-cardinality metrics. Requires the optional
+`@opentelemetry/api` peer dependency; no-ops silently when no OTel SDK is
+registered (nothing to configure, nothing to pay for when unused):
+
+```ts
+import { instrumentMonetizeKit } from "@monetizekit/node/otel";
+
+const mk = new MonetizeKit({
+  apiKey: process.env.MONETIZEKIT_SECRET_KEY!,
+  observers: [instrumentMonetizeKit()],
+});
+```
+
+Denials are span status `OK` with `monetizekit.decision=denied` — never
+`ERROR` (only transport failures are errors). Every span carries a
+`monetizekit.inspector_url` attribute deep-linking to that exact evaluation in
+the dashboard inspector (self-hosting: set `inspectorBaseUrl`; disable with
+`null`). Traces and metrics are independently enableable via
+`instrumentMonetizeKit({ traces, metrics })`.
+
 ### Credit reservations (AI/agent workloads)
 
 Hold credits before work whose final cost is unknown, then capture the actual

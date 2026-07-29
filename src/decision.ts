@@ -51,6 +51,14 @@ export interface EntitlementCheckDecision {
   cached?: boolean;
   /** True when produced by the degradation fallback after an API failure. */
   degraded?: boolean;
+  /**
+   * Id of the platform evaluation-log record behind this decision
+   * (FRD-PO-004). Deep-links to the dashboard inspector at
+   * `/observability/inspector/{evaluationId}`; retained for 90 days.
+   * Absent on cache-served and degraded decisions that never hit the API
+   * (cache hits reuse the original evaluation's id).
+   */
+  evaluationId?: string;
 }
 
 export interface BatchCheckResponse {
@@ -74,6 +82,8 @@ export interface DecisionEvent {
   cached: boolean;
   degraded: boolean;
   timestamp: string;
+  /** Platform evaluation-log id for this decision, when the API supplied one. */
+  evaluationId?: string;
   /** Set when the underlying API call failed (degraded or thrown decisions). */
   error?: string;
 }
