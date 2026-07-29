@@ -19,12 +19,72 @@ const mk = new MonetizeKit({ apiKey: process.env.MONETIZEKIT_SECRET_KEY! });
 
 // Gate a feature
 const decision = await mk.entitlements.check("cust_123", "api_access");
-if (decision.value) {
+if (decision.allowed) {
   // entitled
+} else {
+  // decision.reasonCode: "not_in_plan" | "limit_reached" | "unknown_feature" | ...
+  // decision.grantedByPlans: plans that would grant access (upgrade path)
+  // decision.resetsAt: when a reached limit's window resets
 }
+
+// Check many features with one customer resolution
+const decisions = await mk.entitlements.checkMany("cust_123", [
+  "api_access",
+  "sso",
+  "seats",
+]);
 
 // Manage customers
 const { data: customers } = await mk.customers.list({ page: 1, pageSize: 20 });
+```
+
+### Caching, degradation, and observability
+
+```ts
+const mk = new MonetizeKit({
+  apiKey: process.env.MONETIZEKIT_SECRET_KEY!,
+  // Local decision cache (off by default): true for 30s TTL, or tune it.
+  cache: { ttlMs: 30_000, maxEntries: 10_000 },
+  // When the API is unreachable: "throw" (default) | "fail_open" | "fail_closed".
+  // Stale cached decisions are preferred over synthesized ones.
+  degradation: "fail_open",
+  // Every decision (API-served, cached, degraded) is emitted to observers —
+  // the hook OpenTelemetry/PostHog integrations attach to.
+  observers: [{ onDecision: (event) => console.log(event) }],
+});
+```
+
+### Credit reservations (AI/agent workloads)
+
+Hold credits before work whose final cost is unknown, then capture the actual
+cost — the platform guarantees concurrent holds never oversubscribe a wallet:
+
+```ts
+const { value } = await mk.credits.withReservation(
+  { customerId: "cust_123", amount: 100, description: "agent run" },
+  async () => {
+    const output = await runAgent();
+    return { value: output, cost: output.tokensUsed * 0.01 };
+  },
+);
+// On failure the hold is released automatically; unresolved holds expire
+// server-side after their TTL (default 300s).
+```
+
+Lower-level primitives: `credits.reserve()`, `credits.captureReservation()`,
+`credits.releaseReservation()`, `credits.getReservation()`.
+
+### Identity resolution
+
+Identity-provider integrations (Clerk, Supabase, custom auth) implement the
+`IdentityResolver` interface:
+
+```ts
+const mk = new MonetizeKit({
+  apiKey: process.env.MONETIZEKIT_SECRET_KEY!,
+  identityResolver: myResolver, // e.g. from @monetizekit/clerk
+});
+const customerId = await mk.resolveCustomerId("user_2abc...");
 ```
 
 ### Verify webhooks

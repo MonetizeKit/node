@@ -18,6 +18,18 @@
  * ```
  */
 import { HttpClient, type HttpClientConfig } from "./http-client";
+import { DecisionCache, type DecisionCacheConfig } from "./cache";
+import { ConfigurationError } from "./errors";
+import type {
+  BatchCheckResponse,
+  DecisionEvent,
+  DecisionEventKind,
+  DecisionObserver,
+  DegradationMode,
+  EntitlementCheckDecision,
+  EntitlementReasonCode,
+  IdentityResolver,
+} from "./decision";
 import type {
   Customer,
   Plan,
@@ -32,6 +44,17 @@ import type {
 export * from "./errors";
 export * from "./webhooks";
 export type { HttpClientConfig } from "./http-client";
+export type { DecisionCacheConfig } from "./cache";
+export type {
+  BatchCheckResponse,
+  DecisionEvent,
+  DecisionEventKind,
+  DecisionObserver,
+  DegradationMode,
+  EntitlementCheckDecision,
+  EntitlementReasonCode,
+  IdentityResolver,
+} from "./decision";
 export type {
   Customer,
   Plan,
@@ -66,13 +89,183 @@ export interface PreflightResult {
   reasons: string[];
 }
 
-class EntitlementsResource {
-  constructor(private http: HttpClient) {}
+interface EntitlementsOptions {
+  cache: DecisionCache<EntitlementCheckDecision> | null;
+  degradation: DegradationMode;
+  observers: DecisionObserver[];
+}
 
-  async check(customerId: string, featureKey: string): Promise<EntitlementResult> {
-    return this.http.get<EntitlementResult>(
-      `/api/v1/entitlements/${customerId}/${featureKey}`,
-    );
+class EntitlementsResource {
+  constructor(
+    private http: HttpClient,
+    private options: EntitlementsOptions,
+  ) {}
+
+  private emit(event: DecisionEvent): void {
+    for (const observer of this.options.observers) {
+      try {
+        observer.onDecision(event);
+      } catch {
+        // Observers must never break a product decision.
+      }
+    }
+  }
+
+  private emitDecision(
+    kind: DecisionEventKind,
+    customerId: string,
+    decision: EntitlementCheckDecision,
+    latencyMs: number,
+    error?: string,
+  ): void {
+    this.emit({
+      kind,
+      customerId,
+      featureKey: decision.featureKey,
+      allowed: decision.allowed,
+      reasonCode: decision.reasonCode,
+      latencyMs,
+      cached: decision.cached ?? false,
+      degraded: decision.degraded ?? false,
+      timestamp: new Date().toISOString(),
+      ...(error ? { error } : {}),
+    });
+  }
+
+  private cacheKey(customerId: string, featureKey: string): string {
+    return `${customerId}\u0000${featureKey}`;
+  }
+
+  /**
+   * Degradation fallback for a failed API call: prefer a stale cached
+   * decision (real data, just old) over a synthesized one.
+   */
+  private degradedDecision(
+    customerId: string,
+    featureKey: string,
+    failure: unknown,
+  ): EntitlementCheckDecision {
+    const stale = this.options.cache?.getStale(this.cacheKey(customerId, featureKey));
+    if (stale) return { ...stale, cached: true, degraded: true };
+
+    const failOpen = this.options.degradation === "fail_open";
+    const reasonCode: EntitlementReasonCode = failOpen ? "sdk_fail_open" : "sdk_fail_closed";
+    return {
+      customerId,
+      featureKey,
+      allowed: failOpen,
+      effectiveValue: failOpen,
+      type: "boolean",
+      sources: [],
+      reason: `MonetizeKit API unavailable (${
+        failure instanceof Error ? failure.message : String(failure)
+      }); ${failOpen ? "failing open" : "failing closed"} per SDK degradation policy`,
+      reasonCode,
+      degraded: true,
+    };
+  }
+
+  /**
+   * Check a single feature. Served from the local cache when fresh; on API
+   * failure, behavior follows the configured degradation mode (`throw`,
+   * `fail_open`, or `fail_closed` — the latter two prefer stale cache).
+   */
+  async check(
+    customerId: string,
+    featureKey: string,
+    options?: { bypassCache?: boolean },
+  ): Promise<EntitlementCheckDecision> {
+    const key = this.cacheKey(customerId, featureKey);
+    const started = Date.now();
+
+    if (!options?.bypassCache) {
+      const fresh = this.options.cache?.getFresh(key);
+      if (fresh) {
+        const decision = { ...fresh, cached: true };
+        this.emitDecision("entitlement_check", customerId, decision, Date.now() - started);
+        return decision;
+      }
+    }
+
+    try {
+      const decision = await this.http.get<EntitlementCheckDecision>(
+        `/api/v1/entitlements/${customerId}/${featureKey}`,
+      );
+      this.options.cache?.set(key, decision);
+      this.emitDecision("entitlement_check", customerId, decision, Date.now() - started);
+      return decision;
+    } catch (error) {
+      if (this.options.degradation === "throw") {
+        this.emit({
+          kind: "entitlement_check",
+          customerId,
+          featureKey,
+          latencyMs: Date.now() - started,
+          cached: false,
+          degraded: false,
+          timestamp: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      const decision = this.degradedDecision(customerId, featureKey, error);
+      this.emitDecision(
+        "entitlement_check",
+        customerId,
+        decision,
+        Date.now() - started,
+        error instanceof Error ? error.message : String(error),
+      );
+      return decision;
+    }
+  }
+
+  /**
+   * Check up to 50 features in one call (FRD-PO-002 R2.2): the platform
+   * resolves the customer once and evaluates every key against it. Results
+   * populate the local cache. Degradation applies per feature key.
+   */
+  async checkMany(
+    customerId: string,
+    featureKeys: string[],
+  ): Promise<EntitlementCheckDecision[]> {
+    const started = Date.now();
+    try {
+      const response = await this.http.post<BatchCheckResponse>(
+        "/api/v1/entitlements/batch",
+        { customerId, featureKeys },
+      );
+      const decisions = response.results.map((result) => ({ ...result, customerId }));
+      for (const decision of decisions) {
+        this.options.cache?.set(this.cacheKey(customerId, decision.featureKey), decision);
+        this.emitDecision("batch_check", customerId, decision, Date.now() - started);
+      }
+      return decisions;
+    } catch (error) {
+      if (this.options.degradation === "throw") {
+        this.emit({
+          kind: "batch_check",
+          customerId,
+          latencyMs: Date.now() - started,
+          cached: false,
+          degraded: false,
+          timestamp: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      return featureKeys.map((featureKey) => {
+        const decision = this.degradedDecision(customerId, featureKey, error);
+        this.emitDecision(
+          "batch_check",
+          customerId,
+          decision,
+          Date.now() - started,
+          error instanceof Error ? error.message : String(error),
+        );
+        return decision;
+      });
+    }
   }
 
   async getAll(customerId: string): Promise<EntitlementResult[]> {
@@ -284,6 +477,116 @@ class CreditsResource {
   }): Promise<unknown> {
     return this.http.request("PUT", "/api/v1/credits/auto-topup", data);
   }
+
+  /**
+   * Atomically hold credits for in-flight work (FRD-PO-002 W2.1). Concurrent
+   * reservations can never oversubscribe a wallet. Capture or release before
+   * the TTL expires; expired holds are auto-released by the platform.
+   */
+  async reserve(data: ReserveCreditsInput): Promise<ReservationResult> {
+    return this.http.post<ReservationResult>(
+      "/api/v1/credits/reserve",
+      data,
+      data.idempotencyKey,
+    );
+  }
+
+  async getReservation(reservationId: string): Promise<{ reservation: CreditReservation }> {
+    return this.http.get<{ reservation: CreditReservation }>(
+      `/api/v1/credits/reservations/${reservationId}`,
+    );
+  }
+
+  /**
+   * Finalize a reservation as usage. Omit `amount` to capture the full hold;
+   * a partial capture returns the remainder to the wallet.
+   */
+  async captureReservation(
+    reservationId: string,
+    amount?: number,
+  ): Promise<ReservationResult> {
+    return this.http.post<ReservationResult>(
+      `/api/v1/credits/reservations/${reservationId}/capture`,
+      amount !== undefined ? { amount } : {},
+    );
+  }
+
+  /** Release a reservation, returning the full hold to the wallet. */
+  async releaseReservation(reservationId: string): Promise<ReservationResult> {
+    return this.http.post<ReservationResult>(
+      `/api/v1/credits/reservations/${reservationId}/release`,
+      {},
+    );
+  }
+
+  /**
+   * Reserve → do the work → capture the actual cost; release on failure.
+   *
+   * @example
+   * ```ts
+   * const { value } = await mk.credits.withReservation(
+   *   { customerId, amount: 100, description: "agent run" },
+   *   async () => {
+   *     const output = await runAgent();
+   *     return { value: output, cost: output.tokensUsed * 0.01 };
+   *   },
+   * );
+   * ```
+   */
+  async withReservation<T>(
+    data: ReserveCreditsInput,
+    fn: (reservation: CreditReservation) => Promise<{ value: T; cost?: number }>,
+  ): Promise<{ value: T; reservation: CreditReservation; walletBalance: number }> {
+    const { reservation } = await this.reserve(data);
+    try {
+      const outcome = await fn(reservation);
+      const captured = await this.captureReservation(reservation.id, outcome.cost);
+      return {
+        value: outcome.value,
+        reservation: captured.reservation,
+        walletBalance: captured.walletBalance,
+      };
+    } catch (error) {
+      try {
+        await this.releaseReservation(reservation.id);
+      } catch {
+        // The platform's TTL sweeper will release the hold; the original
+        // failure is more useful to the caller than the release failure.
+      }
+      throw error;
+    }
+  }
+}
+
+export interface ReserveCreditsInput {
+  customerId: string;
+  amount: number;
+  /** Source wallet (defaults to "default"). */
+  walletKey?: string;
+  /** Hold lifetime in seconds (10–86400; platform default 300). */
+  ttlSeconds?: number;
+  description?: string;
+  /** Persisted on the reservation: replays return the same hold. */
+  idempotencyKey?: string;
+  dimensions?: Record<string, string | number | boolean>;
+}
+
+export interface CreditReservation {
+  id: string;
+  customerId: string;
+  walletId: string;
+  status: "held" | "captured" | "released" | "expired";
+  amount: number;
+  capturedAmount: number | null;
+  description: string;
+  expiresAt: string;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface ReservationResult {
+  reservation: CreditReservation;
+  walletBalance: number;
 }
 
 class PlansResource {
@@ -466,6 +769,26 @@ class ExperimentsResource {
 // Main Client
 // ============================================================
 
+export interface MonetizeKitConfig extends HttpClientConfig {
+  /**
+   * Local entitlement-decision cache. `true` enables the defaults (30s TTL,
+   * 10k entries); pass an object to tune. Off by default — decisions always
+   * hit the API unless you opt in.
+   */
+  cache?: boolean | DecisionCacheConfig;
+  /**
+   * What `entitlements.check`/`checkMany` do when the API is unreachable:
+   * `throw` (default) rethrows; `fail_open`/`fail_closed` return a stale
+   * cached decision when one exists, else a synthesized allow/deny with
+   * `reasonCode: "sdk_fail_open" | "sdk_fail_closed"` and `degraded: true`.
+   */
+  degradation?: DegradationMode;
+  /** Observability hooks — receive every entitlement decision the SDK makes. */
+  observers?: DecisionObserver[];
+  /** Identity extension point — used by `resolveCustomerId()`. */
+  identityResolver?: IdentityResolver;
+}
+
 export class MonetizeKit {
   public readonly entitlements: EntitlementsResource;
   public readonly customers: CustomersResource;
@@ -478,10 +801,20 @@ export class MonetizeKit {
   public readonly entities: EntitiesResource;
 
   private readonly http: HttpClient;
+  private readonly identityResolver: IdentityResolver | null;
 
-  constructor(config: HttpClientConfig) {
+  constructor(config: MonetizeKitConfig) {
     this.http = new HttpClient(config);
-    this.entitlements = new EntitlementsResource(this.http);
+    const cache = config.cache
+      ? new DecisionCache<EntitlementCheckDecision>(
+          typeof config.cache === "object" ? config.cache : undefined,
+        )
+      : null;
+    this.entitlements = new EntitlementsResource(this.http, {
+      cache,
+      degradation: config.degradation ?? "throw",
+      observers: config.observers ?? [],
+    });
     this.customers = new CustomersResource(this.http);
     this.subscriptions = new SubscriptionsResource(this.http);
     this.usage = new UsageResource(this.http);
@@ -490,5 +823,24 @@ export class MonetizeKit {
     this.features = new FeaturesResource(this.http);
     this.experiments = new ExperimentsResource(this.http);
     this.entities = new EntitiesResource(this.http);
+    this.identityResolver = config.identityResolver ?? null;
+  }
+
+  /**
+   * Resolve an external identity (e.g. a Clerk or Supabase user id) to a
+   * MonetizeKit customer id via the configured {@link IdentityResolver}.
+   * Returns null when no mapping exists.
+   */
+  async resolveCustomerId(
+    externalId: string,
+    context?: Record<string, unknown>,
+  ): Promise<string | null> {
+    if (!this.identityResolver) {
+      throw new ConfigurationError(
+        "No identityResolver configured. Pass one in the MonetizeKit constructor " +
+          "(e.g. from an identity-provider integration package).",
+      );
+    }
+    return this.identityResolver.resolveCustomerId(externalId, context);
   }
 }
