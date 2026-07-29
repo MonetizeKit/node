@@ -1,10 +1,10 @@
 name: Examples Watch
 
-# Surface-maintenance loops (examples + docs), step 1 (watch + escalate) —
-# SDK side.
+# Surface-maintenance loops (examples + docs + security), step 1 (watch +
+# escalate) — SDK side.
 #
 # The surface registries and impact script live in the monorepo
-# (app-monetizekit-monorepo/docs/engineering/{examples,docs}-maintenance/registry.json,
+# (app-monetizekit-monorepo/docs/engineering/{examples,docs,security}-maintenance/registry.json,
 # scripts/surface-impact.mjs) so context stays single-sourced. This workflow
 # only computes the changed-file list for the SDK's public surface and
 # escalates it as an `examples-drift` issue in THIS repo. The maintenance
@@ -12,8 +12,9 @@ name: Examples Watch
 # `--registry <registry> --repo node --files <list>` (once per loop) to get
 # the authoritative reports.
 #
-# See MonetizeKit/agent-skills → agents/example-maintenance and
-# agents/docs-maintenance for the agent charters.
+# See MonetizeKit/agent-skills → agents/example-maintenance,
+# agents/docs-maintenance, and agents/security-maintenance for the agent
+# charters.
 
 on:
   push:
@@ -65,12 +66,13 @@ jobs:
               "",
               ...files.map((f) => `- \`${f}\``),
               "",
-              "**Agent next step** (see MonetizeKit/agent-skills → agents/example-maintenance and agents/docs-maintenance):",
+              "**Agent next step** (see MonetizeKit/agent-skills → agents/example-maintenance, agents/docs-maintenance, agents/security-maintenance):",
               "",
               "```bash",
               "# in app-monetizekit-monorepo — run once per loop",
               `node scripts/surface-impact.mjs --registry docs/engineering/examples-maintenance/registry.json --repo node --files "${files.join(",")}"`,
               `node scripts/surface-impact.mjs --registry docs/engineering/docs-maintenance/registry.json --repo node --files "${files.join(",")}"`,
+              `node scripts/surface-impact.mjs --registry docs/engineering/security-maintenance/registry.json --repo node --files "${files.join(",")}"`,
               "```",
               "",
               "Triage the resulting reports, fix drifted surfaces, refresh `verified` stamps in the registries, then close this issue.",
