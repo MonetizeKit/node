@@ -58,6 +58,19 @@ jobs:
       - name: Install smoke (pack + consume)
         run: node scripts/install-smoke.mjs
 
+  # Shadow-mode reviewer from MonetizeKit/.github: one advisory comment per PR,
+  # never blocks (the reusable workflow is continue-on-error internally and
+  # self-skips without a credential), and is not part of required-checks.
+  # Model, tools and route come from the fleet agent-policy.json.
+  shadow-review:
+    name: Shadow Review (advisory)
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: MonetizeKit/.github/.github/workflows/reusable-pr-review.yml@v1
+    secrets: inherit
+
   required-checks:
     name: Required Checks Gate
     runs-on: ubuntu-latest
