@@ -1,0 +1,96 @@
+# Stage Gate — one aggregate verdict per stage branch.
+#
+# Publishes `Stage Gate / development` and `Stage Gate / delivery` on the stage
+# heads by asking every loop declared in .github/stage-gate.json what it
+# concluded about that head. Promotion (`promote.yml`) reads that check run and
+# nothing else. Evaluation is API-only (no install). Fleet runbook:
+# app-monetizekit-monorepo/docs/engineering/stage-gate.md.
+name: Stage Gate
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Examples Watch
+    types: [completed]
+  issues:
+    types: [closed, labeled, unlabeled]
+  schedule:
+    - cron: "15 * * * *"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to evaluate
+        required: false
+        type: choice
+        default: both
+        options:
+          - both
+          - development
+          - delivery
+      sha:
+        description: Evaluate this commit instead of the stage head (dry run)
+        required: false
+        type: string
+      publish:
+        description: Publish the check run (uncheck to report only)
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Pick stages
+    runs-on: ubuntu-latest
+    # Drift issues re-open the gate question; other issue traffic is noise.
+    if: >-
+      ${{
+        github.event_name != 'issues' ||
+        contains(join(github.event.issue.labels.*.name, ','), '-drift')
+      }}
+    outputs:
+      stages: ${{ steps.pick.outputs.stages }}
+    steps:
+      - name: Pick stages from the triggering event
+        id: pick
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INPUT_STAGE: ${{ inputs.stage }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_STAGE" ] && [ "$INPUT_STAGE" != "both" ]; then
+            stages="[\"$INPUT_STAGE\"]"
+          elif [ "$EVENT_NAME" = "workflow_run" ] && { [ "$HEAD_BRANCH" = "development" ] || [ "$HEAD_BRANCH" = "delivery" ]; }; then
+            stages="[\"$HEAD_BRANCH\"]"
+          else
+            stages='["development","delivery"]'
+          fi
+          echo "stages=$stages" >> "$GITHUB_OUTPUT"
+          echo "Evaluating stages: $stages"
+
+  gate:
+    name: Evaluate
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: ${{ fromJSON(needs.plan.outputs.stages) }}
+    # A newer evaluation of the same stage supersedes a running one.
+    concurrency:
+      group: stage-gate-${{ matrix.stage }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      checks: write
+      actions: read
+      issues: read
+    uses: MonetizeKit/.github/.github/workflows/reusable-stage-gate.yml@v1
+    with:
+      stage: ${{ matrix.stage }}
+      sha: ${{ inputs.sha || '' }}
+      publish: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
