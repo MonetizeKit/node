@@ -1,0 +1,106 @@
+name: Examples Watch
+
+# Surface-maintenance loops (examples + docs + security), step 1 (watch +
+# escalate) — SDK side.
+#
+# The surface registries and impact script live in the monorepo
+# (app-monetizekit-monorepo/docs/engineering/{examples,docs,security}-maintenance/registry.json,
+# scripts/surface-impact.mjs) so context stays single-sourced. This workflow
+# only computes the changed-file list for the SDK's public surface and
+# escalates it as an `examples-drift` issue in THIS repo. The maintenance
+# agents pick the issue up and run the monorepo impact script with
+# `--registry <registry> --repo node --files <list>` (once per loop) to get
+# the authoritative reports.
+#
+# Agent charters live with each loop's managed context in the monorepo:
+# app-monetizekit-monorepo/docs/engineering/{examples,docs,security}-maintenance/AGENT.md.
+# (MonetizeKit/agent-skills is the public customer-facing skills registry and
+# holds no internal charters.)
+
+on:
+  push:
+    branches: [main, delivery, development]
+    paths:
+      - "src/**"
+      - ".changeset/**"
+      - "package.json"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  escalate:
+    name: Escalate SDK surface change
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed contract files
+        id: delta
+        run: |
+          if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
+            RANGE="${{ github.event.before }}..${{ github.sha }}"
+          else
+            RANGE="${{ github.sha }}~1..${{ github.sha }}"
+          fi
+          git diff --name-only "$RANGE" -- src .changeset package.json README.md > /tmp/changed.txt
+          echo "Changed contract files:"
+          cat /tmp/changed.txt
+          echo "count=$(wc -l < /tmp/changed.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Escalate — open or update examples-drift issue
+        if: steps.delta.outputs.count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const files = fs.readFileSync("/tmp/changed.txt", "utf8").trim().split("\n");
+            const branch = context.ref.replace("refs/heads/", "");
+            const title = "examples-drift: @monetizekit/node public surface changed — triage examples";
+            const body = [
+              `SDK contract-surface changes landed on \`${branch}\` in ${context.sha}:`,
+              "",
+              ...files.map((f) => `- \`${f}\``),
+              "",
+              "**Agent next step** (charters: app-monetizekit-monorepo → docs/engineering/{examples,docs,security}-maintenance/AGENT.md):",
+              "",
+              "```bash",
+              "# in app-monetizekit-monorepo — run once per loop",
+              `node scripts/surface-impact.mjs --registry docs/engineering/examples-maintenance/registry.json --repo node --files "${files.join(",")}"`,
+              `node scripts/surface-impact.mjs --registry docs/engineering/docs-maintenance/registry.json --repo node --files "${files.join(",")}"`,
+              `node scripts/surface-impact.mjs --registry docs/engineering/security-maintenance/registry.json --repo node --files "${files.join(",")}"`,
+              "```",
+              "",
+              "Triage the resulting reports, fix drifted surfaces, refresh `verified` stamps in the registries, then close this issue.",
+              "",
+              "---",
+              "_Escalated automatically by `.github/workflows/examples-watch.yml`._",
+            ].join("\n");
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "examples-drift",
+            });
+            if (issues.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["examples-drift"],
+              });
+            }
