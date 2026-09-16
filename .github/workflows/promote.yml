@@ -80,6 +80,7 @@ jobs:
     uses: MonetizeKit/.github/.github/workflows/reusable-promote.yml@v1
     permissions:
       contents: read
+      actions: read
       pull-requests: write
     with:
       source: development
@@ -98,6 +99,7 @@ jobs:
     uses: MonetizeKit/.github/.github/workflows/reusable-promote.yml@v1
     permissions:
       contents: read
+      actions: read
       pull-requests: write
     with:
       source: delivery
