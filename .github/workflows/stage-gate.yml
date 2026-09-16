@@ -93,4 +93,4 @@ jobs:
       sha: ${{ inputs.sha || '' }}
       publish: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
     secrets:
-      GH_PAT: ${{ secrets.GH_PAT }}
+      PHASE_SDLC_TOKEN: ${{ secrets.PHASE_SDLC_TOKEN }}

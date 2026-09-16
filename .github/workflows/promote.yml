@@ -87,7 +87,7 @@ jobs:
       auto_merge: true
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
     secrets:
-      GH_PAT: ${{ secrets.GH_PAT }}
+      PHASE_SDLC_TOKEN: ${{ secrets.PHASE_SDLC_TOKEN }}
 
   delivery:
     name: delivery -> main
@@ -108,4 +108,4 @@ jobs:
       changelog_command: git log --no-merges --pretty='- %s' origin/main..origin/delivery
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
     secrets:
-      GH_PAT: ${{ secrets.GH_PAT }}
+      PHASE_SDLC_TOKEN: ${{ secrets.PHASE_SDLC_TOKEN }}
