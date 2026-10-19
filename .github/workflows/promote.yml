@@ -1,0 +1,111 @@
+# Promote — walks the promotion chain from the Stage Gate verdicts.
+#
+#   development -> delivery   automatic. When `Stage Gate / development` is
+#                             green on the development head, the bot opens or
+#                             updates the promotion PR and enables auto-merge;
+#                             GitHub merges it when the required checks pass.
+#   delivery -> main          prepared, human-authorized. When `Stage Gate /
+#                             delivery` is green (+ PROMOTION_SOAK_MINUTES) the
+#                             bot opens or updates the PR with the commit log,
+#                             the loop-by-loop gate evidence and the review
+#                             findings across the included feature PRs. It
+#                             never merges: a code-owner approval on main is
+#                             the release gate.
+#   promotion-guard           on every PR into delivery or main: passes only
+#                             when the head is the upstream stage, so the only
+#                             route to production is this chain.
+#
+# Changesets publishing fires on push to main, so a release is the result of a
+# promotion to main, not of a feature merge.
+#
+# Runs when Stage Gate completes, every 30 minutes (soak expiry, observers in
+# other repositories), and by hand; both hops are evaluated each run because
+# the bot is a few API reads and a no-op with nothing to promote. The bot is
+# MonetizeKit/.github/scripts/promote/run.mjs (agent-policy role
+# `promotion-bot`). Runbook: app-monetizekit-monorepo
+# docs/engineering/promotion.md.
+#
+# Admin prerequisites (user actions): "Allow auto-merge" on this repository;
+# branch protection on delivery and main requiring `Required Checks Gate` and
+# `promotion-guard`, and a code-owner review on main; GH_PAT in Actions
+# secrets so the promotion PR's CI runs.
+name: Promote
+
+on:
+  workflow_run:
+    workflows: [Stage Gate]
+    types: [completed]
+  pull_request:
+    branches: [delivery, main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  schedule:
+    - cron: "15,45 * * * *"
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Hop to evaluate
+        required: false
+        type: choice
+        default: both
+        options:
+          - both
+          - development
+          - delivery
+      dry_run:
+        description: Report only; open no PR
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'chain' }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: promotion-guard
+    if: github.event_name == 'pull_request'
+    uses: MonetizeKit/.github/.github/workflows/reusable-promotion-guard.yml@v1
+
+  development:
+    name: development -> delivery
+    if: >-
+      ${{
+        github.event_name != 'pull_request' &&
+        (github.event_name != 'workflow_dispatch' || inputs.source == 'both' || inputs.source == 'development')
+      }}
+    uses: MonetizeKit/.github/.github/workflows/reusable-promote.yml@v1
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    with:
+      source: development
+      auto_merge: true
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    secrets:
+      PHASE_SDLC_TOKEN: ${{ secrets.PHASE_SDLC_TOKEN }}
+
+  delivery:
+    name: delivery -> main
+    if: >-
+      ${{
+        github.event_name != 'pull_request' &&
+        (github.event_name != 'workflow_dispatch' || inputs.source == 'both' || inputs.source == 'delivery')
+      }}
+    uses: MonetizeKit/.github/.github/workflows/reusable-promote.yml@v1
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    with:
+      source: delivery
+      auto_merge: false
+      soak_minutes: ${{ fromJSON(vars.PROMOTION_SOAK_MINUTES || '0') }}
+      changelog_command: git log --no-merges --pretty='- %s' origin/main..origin/delivery
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    secrets:
+      PHASE_SDLC_TOKEN: ${{ secrets.PHASE_SDLC_TOKEN }}

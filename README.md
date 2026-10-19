@@ -73,8 +73,8 @@ const mk = new MonetizeKit({
 Denials are span status `OK` with `monetizekit.decision=denied` — never
 `ERROR` (only transport failures are errors). Every span carries a
 `monetizekit.inspector_url` attribute deep-linking to that exact evaluation in
-the dashboard inspector (self-hosting: set `inspectorBaseUrl`; disable with
-`null`). Traces and metrics are independently enableable via
+the dashboard inspector (point it at another dashboard origin, such as a
+staging environment, with `inspectorBaseUrl`; disable with `null`). Traces and metrics are independently enableable via
 `instrumentMonetizeKit({ traces, metrics })`.
 
 ### Credit reservations (AI/agent workloads)
@@ -99,13 +99,13 @@ Lower-level primitives: `credits.reserve()`, `credits.captureReservation()`,
 
 ### Identity resolution
 
-Identity-provider integrations (Clerk, Supabase, custom auth) implement the
-`IdentityResolver` interface:
+Map your auth provider's user id (Clerk, Supabase, custom auth) to a
+MonetizeKit customer id by implementing the `IdentityResolver` interface:
 
 ```ts
 const mk = new MonetizeKit({
   apiKey: process.env.MONETIZEKIT_SECRET_KEY!,
-  identityResolver: myResolver, // e.g. from @monetizekit/clerk
+  identityResolver: myResolver, // your IdentityResolver implementation
 });
 const customerId = await mk.resolveCustomerId("user_2abc...");
 ```
@@ -125,4 +125,4 @@ const ok = verifyWebhookSignature({
 
 ## License
 
-MIT
+Apache-2.0 © [Coordinated App LLC](https://monetizekit.com), d/b/a MonetizeKit. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

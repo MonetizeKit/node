@@ -1,0 +1,52 @@
+{
+  "$schema": "https://raw.githubusercontent.com/MonetizeKit/.github/v1/schemas/stage-gate.schema.json",
+  "description": "Observing loops whose verdict on the stage head must hold before promotion. Evaluated by MonetizeKit/.github reusable-stage-gate.yml into `Stage Gate / <stage>`; consumed by promote.yml. Fleet runbook: app-monetizekit-monorepo/docs/engineering/stage-gate.md.",
+  "stages": {
+    "development": {
+      "base": "delivery",
+      "signals": [
+        {
+          "id": "required-checks",
+          "title": "Required Checks Gate (push CI on the development head)",
+          "loop": "CI",
+          "type": "check-run",
+          "name": "Required Checks Gate",
+          "workflow": ".github/workflows/ci.yml"
+        },
+        {
+          "id": "drift-clear",
+          "title": "Drift clear: no open examples-drift issue cites a commit in delivery..development",
+          "loop": "Examples Watch",
+          "type": "drift-clear",
+          "labels": [
+            "examples-drift"
+          ],
+          "mode": "cites-range"
+        }
+      ]
+    },
+    "delivery": {
+      "base": "main",
+      "signals": [
+        {
+          "id": "required-checks",
+          "title": "Required Checks Gate (push CI on the delivery head)",
+          "loop": "CI",
+          "type": "check-run",
+          "name": "Required Checks Gate",
+          "workflow": ".github/workflows/ci.yml"
+        },
+        {
+          "id": "drift-clear",
+          "title": "Drift clear: no open examples-drift issue cites a commit in main..delivery",
+          "loop": "Examples Watch",
+          "type": "drift-clear",
+          "labels": [
+            "examples-drift"
+          ],
+          "mode": "cites-range"
+        }
+      ]
+    }
+  }
+}

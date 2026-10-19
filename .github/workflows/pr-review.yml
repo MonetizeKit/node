@@ -1,0 +1,21 @@
+# SHADOW-MODE reviewer gate pilot (Phase 2 canary — this repo only).
+# Advisory: never blocks, not part of the Required Checks Gate, self-skips
+# without ANTHROPIC_API_KEY. Graduates to blocking only after the burn-in
+# bars in MonetizeKit/.github schemas/metrics-policy.json are met.
+name: PR Review (shadow)
+
+on:
+  pull_request:
+    branches: [main, delivery, development]
+
+concurrency:
+  group: pr-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    uses: MonetizeKit/.github/.github/workflows/reusable-pr-review.yml@v1
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: write
