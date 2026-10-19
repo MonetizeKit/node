@@ -97,8 +97,8 @@ export interface InstrumentMonetizeKitOptions {
   /**
    * Dashboard origin used to render `monetizekit.inspector_url` deep links
    * (`{inspectorBaseUrl}/observability/inspector/{evaluationId}`). Defaults
-   * to the hosted dashboard. Set to your dashboard origin when self-hosting;
-   * set to null to omit the attribute entirely.
+   * to the hosted dashboard. Set to another dashboard origin (for example a
+   * staging environment); set to null to omit the attribute entirely.
    */
   inspectorBaseUrl?: string | null;
 }
