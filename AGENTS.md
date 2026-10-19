@@ -11,8 +11,11 @@ entitlement/decision helpers, OpenTelemetry hooks). Source in `src/`, tests in
 - `pnpm install --frozen-lockfile`
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`
 - `pnpm check-entry`, `pnpm smoke`
-- `.github/workflows/examples-watch.yml` checks the `examples` repository
-  against this SDK on a schedule.
+- `.github/workflows/examples-watch.yml` opens an `examples-drift` issue when
+  the public surface (`src/`, changesets, `package.json`, `README.md`) changes
+  on `development`. Stage Gate blocks promotion until the monorepo's
+  maintenance triage (registries under
+  `app-monetizekit-monorepo/docs/engineering/*-maintenance/`) closes it.
 
 ## Conventions
 

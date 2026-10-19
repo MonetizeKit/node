@@ -16,10 +16,17 @@ name: Examples Watch
 # app-monetizekit-monorepo/docs/engineering/{examples,docs,security}-maintenance/AGENT.md.
 # (MonetizeKit/agent-skills is the public customer-facing skills registry and
 # holds no internal charters.)
+#
+# Escalates on `development` only. Every change reaches `delivery` and `main`
+# through a promotion from `development`, where it was already escalated; the
+# issue cites the development commit, which stays in the promotion range, so
+# Stage Gate's `drift-clear` still blocks until triage closes it. Watching the
+# promotion and release merges too re-escalated already-triaged changes with
+# citations of their merge commits and blocked the next promotion.
 
 on:
   push:
-    branches: [main, delivery, development]
+    branches: [development]
     paths:
       - "src/**"
       - ".changeset/**"
