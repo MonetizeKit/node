@@ -2,9 +2,11 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 concurrency: release-${{ github.ref }}
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     uses: MonetizeKit/.github/.github/workflows/reusable-sdk-release.yml@v1
     permissions:
       actions: write
